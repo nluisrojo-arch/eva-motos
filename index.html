@@ -12,8 +12,12 @@ body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI
 .wrap{max-width:960px;margin:0 auto}
 .header{background:var(--bg2);border-bottom:1px solid var(--border2);padding:10px 16px;display:flex;align-items:center;justify-content:space-between}
 .htitle{font-size:15px;font-weight:500;color:var(--cyan);letter-spacing:1px}
-.hright{display:flex;align-items:center;gap:12px}
+.hright{display:flex;align-items:center;gap:10px}
 .hdate{font-size:10px;color:var(--muted2);letter-spacing:0.5px}
+.sync-status{font-size:10px;padding:3px 8px;border-radius:3px;border:1px solid var(--border2);color:var(--muted2)}
+.sync-status.ok{color:#00c97a;border-color:#0f3a20}
+.sync-status.saving{color:var(--amber);border-color:#4a2800}
+.sync-status.err{color:var(--red);border-color:#4a1010}
 .btn-export{padding:5px 12px;font-size:10px;font-weight:500;border-radius:3px;cursor:pointer;border:1px solid var(--cyan2);background:transparent;color:var(--cyan);letter-spacing:0.5px;text-transform:uppercase}
 .btn-export:hover{background:var(--cyan3)}
 .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);border-bottom:1px solid var(--border2)}
@@ -62,6 +66,7 @@ tr:hover td{background:var(--bg3)}tr:last-child td{border-bottom:none}
 <div class="header">
   <span class="htitle">EVA MOTOS</span>
   <div class="hright">
+    <span class="sync-status" id="sync-status">Cargando...</span>
     <span class="hdate" id="fhoy"></span>
     <button class="btn-export" onclick="exportarExcel()">⬇ Excel</button>
   </div>
@@ -146,36 +151,71 @@ document.getElementById('v-fecha').value=hoy;
 document.getElementById('g-fecha').value=hoy;
 document.getElementById('gc-fecha').value=hoy;
 
-function getData(k){try{return JSON.parse(localStorage.getItem(k)||'[]')}catch(e){return[]}}
-function setData(k,v){localStorage.setItem(k,JSON.stringify(v))}
+// ---- ESTADO GLOBAL ----
+let state = { ops: [], stock: [], gastos: [] };
+let saveTimer = null;
+
+function setStatus(s){ const el=document.getElementById('sync-status'); el.className='sync-status '+s; el.textContent=s==='ok'?'Sincronizado':s==='saving'?'Guardando...':'Sin conexión'; }
+
+// ---- SYNC CON API ----
+async function loadData(){
+  try{
+    const r = await fetch('/api/data');
+    const d = await r.json();
+    if(d.ops) state = d;
+    else seedDefault();
+    setStatus('ok');
+  } catch(e){
+    // fallback a localStorage
+    const local = localStorage.getItem('eva-motos-state');
+    if(local) state = JSON.parse(local);
+    else seedDefault();
+    setStatus('err');
+  }
+  renderAll();
+}
+
+async function saveData(){
+  setStatus('saving');
+  localStorage.setItem('eva-motos-state', JSON.stringify(state));
+  try{
+    await fetch('/api/data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(state)});
+    setStatus('ok');
+  } catch(e){ setStatus('err'); }
+}
+
+function scheduleSave(){
+  if(saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveData, 800);
+}
+
 function uid(){return Date.now()+Math.random().toString(36).slice(2,6)}
 function fmtS(n){return'$'+Math.round(n||0).toLocaleString('es-AR')}
 function fmtU(n){return'U$D '+Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0})}
 function fmtF(f){if(!f)return'-';const[y,m,d]=String(f).split('-');return`${d}/${m}/${y}`}
 
-function seed(){
-  if(getData('s4').length)return;
-  const ops=[
-    {id:'tx300',nombre:'Husqvarna TX 300 2024',cliente:'Roberto Giurich',
-     compra:{costo:20900000,gastos:[{desc:'Imp. cheque',monto:250800},{desc:'Retiro',monto:266667},{desc:'Protector',monto:300000}],
-       echeqs:[{label:'30/03',fecha:'2026-03-30',monto:3483333,pagado:true},{label:'30/04',fecha:'2026-04-30',monto:3483333,pagado:true},{label:'30/05',fecha:'2026-05-30',monto:3483333,pagado:false},{label:'30/06',fecha:'2026-06-30',monto:3483333,pagado:false},{label:'30/07',fecha:'2026-07-30',monto:3483333,pagado:false},{label:'30/08',fecha:'2026-08-30',monto:3483333,pagado:false}]},
-     venta:{precioUSD:17100,cuotas:[{label:'Cuota 1',fecha:'2026-04-27',usd:3000,tc:null,pagado:false},{label:'Cuota 2',fecha:'2026-05-27',usd:2350,tc:null,pagado:false},{label:'Cuota 3',fecha:'2026-06-27',usd:2350,tc:null,pagado:false},{label:'Cuota 4',fecha:'2026-07-27',usd:2350,tc:null,pagado:false},{label:'Cuota 5',fecha:'2026-08-27',usd:2350,tc:null,pagado:false},{label:'Cuota 6',fecha:'2026-09-20',usd:2350,tc:null,pagado:false},{label:'Cuota 7',fecha:'2026-10-20',usd:2350,tc:null,pagado:false}]}},
-    {id:'ktmda',nombre:'KTM 790 Adventure',cliente:'Danilo',
-     compra:{costo:29000000,gastos:[{desc:'Imp. cheque',monto:348000},{desc:'Retiro',monto:266667}],
-       echeqs:[{label:'30/03',fecha:'2026-03-30',monto:3625000,pagado:true},{label:'09/04',fecha:'2026-04-09',monto:3625000,pagado:true},{label:'30/04',fecha:'2026-04-30',monto:7250000,pagado:true},{label:'30/05',fecha:'2026-05-30',monto:7250000,pagado:true},{label:'30/06',fecha:'2026-06-30',monto:7250000,pagado:true}]},
-     venta:{precioUSD:24000,cuotas:[{label:'Mar',fecha:'2026-03-20',usd:2000,tc:1435,pagado:true},{label:'Abr',fecha:'2026-04-20',usd:2000,tc:1405,pagado:true},{label:'May',fecha:'2026-05-20',usd:2000,tc:1415,pagado:true},{label:'Jun',fecha:'2026-06-20',usd:2000,tc:1415,pagado:true},{label:'Jul',fecha:'2026-07-20',usd:2000,tc:1415,pagado:true},{label:'Ago',fecha:'2026-08-20',usd:2000,tc:null,pagado:false},{label:'Sep',fecha:'2026-09-20',usd:2000,tc:null,pagado:false},{label:'Oct',fecha:'2026-10-20',usd:2000,tc:null,pagado:false},{label:'Nov',fecha:'2026-11-20',usd:2000,tc:null,pagado:false},{label:'Dic (1)',fecha:'2026-12-10',usd:1000,tc:null,pagado:false},{label:'Dic (2)',fecha:'2026-12-20',usd:1000,tc:null,pagado:false},{label:'Ene (1)',fecha:'2027-01-10',usd:1000,tc:null,pagado:false},{label:'Ene (2)',fecha:'2027-01-20',usd:1000,tc:null,pagado:false},{label:'Feb (1)',fecha:'2027-02-10',usd:1000,tc:null,pagado:false},{label:'Feb (2)',fecha:'2027-02-20',usd:1000,tc:null,pagado:false}]}},
-    {id:'ktmca',nombre:'KTM 790 Adventure',cliente:'Cristian Alarcón',
-     compra:{costo:27959400,gastos:[{desc:'Imp. cheque',monto:80513},{desc:'Retiro',monto:650000}],
-       echeqs:[{label:'15/05',fecha:'2026-05-15',monto:5312500,pagado:false},{label:'19/06',fecha:'2026-06-19',monto:5312500,pagado:false},{label:'17/07',fecha:'2026-07-17',monto:5312500,pagado:false},{label:'21/08',fecha:'2026-08-21',monto:5312500,pagado:false}]},
-     venta:{precioUSD:25000,cuotas:[{label:'Echeq 1',fecha:'2026-05-30',usd:null,ars:5312500,tc:1410,pagado:false},{label:'Echeq 2',fecha:'2026-06-30',usd:null,ars:5312500,tc:1410,pagado:false},{label:'Echeq 3',fecha:'2026-07-30',usd:null,ars:5312500,tc:1410,pagado:false},{label:'Echeq 4',fecha:'2026-08-30',usd:null,ars:5312500,tc:1410,pagado:false},{label:'Cuota 5',fecha:'2026-09-14',usd:1986,tc:null,pagado:false},{label:'Cuota 6',fecha:'2026-10-14',usd:1986,tc:null,pagado:false},{label:'Cuota 7',fecha:'2026-11-14',usd:1986,tc:null,pagado:false},{label:'Cuota 8',fecha:'2026-12-14',usd:1986,tc:null,pagado:false},{label:'Cuota 9',fecha:'2027-01-14',usd:1985,tc:null,pagado:false}]}}
-  ];
-  const stock=[{id:'te300',marca:'Husqvarna',modelo:'TE 300',anio:'2023',precioUSD:16000,estado:'disponible',notas:'0km · USD 16.000 al TC del cobro',
-    compra:{costo:19170000,gastos:[{desc:'Imp. cheque',monto:230040},{desc:'Retiro',monto:266667},{desc:'Protector',monto:300000}],
-      echeqs:[{label:'30/03',fecha:'2026-03-30',monto:3195000,pagado:true},{label:'30/04',fecha:'2026-04-30',monto:3195000,pagado:false},{label:'30/05',fecha:'2026-05-30',monto:3195000,pagado:false},{label:'30/06',fecha:'2026-06-30',monto:3195000,pagado:false},{label:'30/07',fecha:'2026-07-30',monto:3195000,pagado:false},{label:'30/08',fecha:'2026-08-30',monto:3195000,pagado:false}]}}];
-  const gastos=[{id:uid(),desc:'Instagram',cat:'publicidad',monto:60000,quien:'ambos',fecha:'2026-03-01'},{id:uid(),desc:'Gastos comunes (cadenas y conos)',cat:'accesorios',monto:89000,quien:'miguel',fecha:'2026-03-01'},{id:uid(),desc:'Airtag',cat:'operativo',monto:148000,quien:'lucho',fecha:'2026-03-01'},{id:uid(),desc:'Cadena y candados',cat:'accesorios',monto:155000,quien:'lucho',fecha:'2026-03-01'},{id:uid(),desc:'Sunchos',cat:'operativo',monto:30000,quien:'lucho',fecha:'2026-03-01'}];
-  setData('ops',ops);setData('stock',stock);setData('gastos',gastos);setData('s4',['y']);
+function seedDefault(){
+  state = {
+    ops:[
+      {id:'tx300',nombre:'Husqvarna TX 300 2024',cliente:'Roberto Giurich',
+       compra:{costo:20900000,gastos:[{desc:'Imp. cheque',monto:250800},{desc:'Retiro',monto:266667},{desc:'Protector',monto:300000}],
+         echeqs:[{label:'30/03',fecha:'2026-03-30',monto:3483333,pagado:true},{label:'30/04',fecha:'2026-04-30',monto:3483333,pagado:true},{label:'30/05',fecha:'2026-05-30',monto:3483333,pagado:false},{label:'30/06',fecha:'2026-06-30',monto:3483333,pagado:false},{label:'30/07',fecha:'2026-07-30',monto:3483333,pagado:false},{label:'30/08',fecha:'2026-08-30',monto:3483333,pagado:false}]},
+       venta:{precioUSD:17100,cuotas:[{label:'Cuota 1',fecha:'2026-04-27',usd:3000,tc:null,pagado:false},{label:'Cuota 2',fecha:'2026-05-27',usd:2350,tc:null,pagado:false},{label:'Cuota 3',fecha:'2026-06-27',usd:2350,tc:null,pagado:false},{label:'Cuota 4',fecha:'2026-07-27',usd:2350,tc:null,pagado:false},{label:'Cuota 5',fecha:'2026-08-27',usd:2350,tc:null,pagado:false},{label:'Cuota 6',fecha:'2026-09-20',usd:2350,tc:null,pagado:false},{label:'Cuota 7',fecha:'2026-10-20',usd:2350,tc:null,pagado:false}]}},
+      {id:'ktmda',nombre:'KTM 790 Adventure',cliente:'Danilo',
+       compra:{costo:29000000,gastos:[{desc:'Imp. cheque',monto:348000},{desc:'Retiro',monto:266667}],
+         echeqs:[{label:'30/03',fecha:'2026-03-30',monto:3625000,pagado:true},{label:'09/04',fecha:'2026-04-09',monto:3625000,pagado:true},{label:'30/04',fecha:'2026-04-30',monto:7250000,pagado:true},{label:'30/05',fecha:'2026-05-30',monto:7250000,pagado:true},{label:'30/06',fecha:'2026-06-30',monto:7250000,pagado:true}]},
+       venta:{precioUSD:24000,cuotas:[{label:'Mar',fecha:'2026-03-20',usd:2000,tc:1435,pagado:true},{label:'Abr',fecha:'2026-04-20',usd:2000,tc:1405,pagado:true},{label:'May',fecha:'2026-05-20',usd:2000,tc:1415,pagado:true},{label:'Jun',fecha:'2026-06-20',usd:2000,tc:1415,pagado:true},{label:'Jul',fecha:'2026-07-20',usd:2000,tc:1415,pagado:true},{label:'Ago',fecha:'2026-08-20',usd:2000,tc:null,pagado:false},{label:'Sep',fecha:'2026-09-20',usd:2000,tc:null,pagado:false},{label:'Oct',fecha:'2026-10-20',usd:2000,tc:null,pagado:false},{label:'Nov',fecha:'2026-11-20',usd:2000,tc:null,pagado:false},{label:'Dic (1)',fecha:'2026-12-10',usd:1000,tc:null,pagado:false},{label:'Dic (2)',fecha:'2026-12-20',usd:1000,tc:null,pagado:false},{label:'Ene (1)',fecha:'2027-01-10',usd:1000,tc:null,pagado:false},{label:'Ene (2)',fecha:'2027-01-20',usd:1000,tc:null,pagado:false},{label:'Feb (1)',fecha:'2027-02-10',usd:1000,tc:null,pagado:false},{label:'Feb (2)',fecha:'2027-02-20',usd:1000,tc:null,pagado:false}]}},
+      {id:'ktmca',nombre:'KTM 790 Adventure',cliente:'Cristian Alarcón',
+       compra:{costo:27959400,gastos:[{desc:'Imp. cheque',monto:80513},{desc:'Retiro',monto:650000}],
+         echeqs:[{label:'15/05',fecha:'2026-05-15',monto:5312500,pagado:false},{label:'19/06',fecha:'2026-06-19',monto:5312500,pagado:false},{label:'17/07',fecha:'2026-07-17',monto:5312500,pagado:false},{label:'21/08',fecha:'2026-08-21',monto:5312500,pagado:false}]},
+       venta:{precioUSD:25000,cuotas:[{label:'Echeq 1',fecha:'2026-05-30',usd:null,ars:5312500,tc:1410,pagado:false},{label:'Echeq 2',fecha:'2026-06-30',usd:null,ars:5312500,tc:1410,pagado:false},{label:'Echeq 3',fecha:'2026-07-30',usd:null,ars:5312500,tc:1410,pagado:false},{label:'Echeq 4',fecha:'2026-08-30',usd:null,ars:5312500,tc:1410,pagado:false},{label:'Cuota 5',fecha:'2026-09-14',usd:1986,tc:null,pagado:false},{label:'Cuota 6',fecha:'2026-10-14',usd:1986,tc:null,pagado:false},{label:'Cuota 7',fecha:'2026-11-14',usd:1986,tc:null,pagado:false},{label:'Cuota 8',fecha:'2026-12-14',usd:1986,tc:null,pagado:false},{label:'Cuota 9',fecha:'2027-01-14',usd:1985,tc:null,pagado:false}]}}
+    ],
+    stock:[{id:'te300',marca:'Husqvarna',modelo:'TE 300',anio:'2023',precioUSD:16000,estado:'disponible',notas:'0km · USD 16.000 al TC del cobro',
+      compra:{costo:19170000,gastos:[{desc:'Imp. cheque',monto:230040},{desc:'Retiro',monto:266667},{desc:'Protector',monto:300000}],
+        echeqs:[{label:'30/03',fecha:'2026-03-30',monto:3195000,pagado:true},{label:'30/04',fecha:'2026-04-30',monto:3195000,pagado:false},{label:'30/05',fecha:'2026-05-30',monto:3195000,pagado:false},{label:'30/06',fecha:'2026-06-30',monto:3195000,pagado:false},{label:'30/07',fecha:'2026-07-30',monto:3195000,pagado:false},{label:'30/08',fecha:'2026-08-30',monto:3195000,pagado:false}]}}],
+    gastos:[{id:uid(),desc:'Instagram',cat:'publicidad',monto:60000,quien:'ambos',fecha:'2026-03-01'},{id:uid(),desc:'Gastos comunes (cadenas y conos)',cat:'accesorios',monto:89000,quien:'miguel',fecha:'2026-03-01'},{id:uid(),desc:'Airtag',cat:'operativo',monto:148000,quien:'lucho',fecha:'2026-03-01'},{id:uid(),desc:'Cadena y candados',cat:'accesorios',monto:155000,quien:'lucho',fecha:'2026-03-01'},{id:uid(),desc:'Sunchos',cat:'operativo',monto:30000,quien:'lucho',fecha:'2026-03-01'}]
+  };
 }
-seed();
 
 function sp(btn,name){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -183,73 +223,66 @@ function sp(btn,name){
   document.getElementById('panel-'+name).classList.add('active');
   btn.classList.add('active');renderAll();
 }
-function toggleCompraOp(opId,idx){const ops=getData('ops');const op=ops.find(o=>o.id===opId);if(op)op.compra.echeqs[idx].pagado=!op.compra.echeqs[idx].pagado;setData('ops',ops);renderAll()}
-function toggleVenta(opId,idx){const ops=getData('ops');const op=ops.find(o=>o.id===opId);if(op)op.venta.cuotas[idx].pagado=!op.venta.cuotas[idx].pagado;setData('ops',ops);renderAll()}
-function saveTc(opId,idx,val){const ops=getData('ops');const op=ops.find(o=>o.id===opId);if(op&&op.venta.cuotas[idx])op.venta.cuotas[idx].tc=parseFloat(val)||null;setData('ops',ops)}
-function toggleCompraStock(sId,idx){const stock=getData('stock');const s=stock.find(x=>x.id===sId);if(s)s.compra.echeqs[idx].pagado=!s.compra.echeqs[idx].pagado;setData('stock',stock);renderAll()}
+
+function toggleCompraOp(opId,idx){const op=state.ops.find(o=>o.id===opId);if(op)op.compra.echeqs[idx].pagado=!op.compra.echeqs[idx].pagado;scheduleSave();renderAll()}
+function toggleVenta(opId,idx){const op=state.ops.find(o=>o.id===opId);if(op)op.venta.cuotas[idx].pagado=!op.venta.cuotas[idx].pagado;scheduleSave();renderAll()}
+function saveTc(opId,idx,val){const op=state.ops.find(o=>o.id===opId);if(op&&op.venta.cuotas[idx])op.venta.cuotas[idx].tc=parseFloat(val)||null;scheduleSave()}
+function toggleCompraStock(sId,idx){const s=state.stock.find(x=>x.id===sId);if(s)s.compra.echeqs[idx].pagado=!s.compra.echeqs[idx].pagado;scheduleSave();renderAll()}
+
 function guardarGastoCompra(){
   const opId=document.getElementById('gc-op').value;const desc=document.getElementById('gc-desc').value.trim();const monto=parseFloat(document.getElementById('gc-monto').value)||0;
   if(!desc||!monto){alert('Completá descripción y monto.');return}
-  const ops=getData('ops');const op=ops.find(o=>o.id===opId);
-  if(op){op.compra.gastos.push({desc,monto});setData('ops',ops)}
+  const op=state.ops.find(o=>o.id===opId);
+  if(op){op.compra.gastos.push({desc,monto});scheduleSave();}
   document.getElementById('gc-desc').value='';document.getElementById('gc-monto').value='';renderAll();
 }
 function guardarGasto(){
   const desc=document.getElementById('g-desc').value.trim();const monto=parseFloat(document.getElementById('g-monto').value)||0;
   if(!desc||!monto){alert('Completá descripción y monto.');return}
-  const gastos=getData('gastos');
-  gastos.unshift({id:uid(),desc,cat:document.getElementById('g-cat').value,monto,quien:document.getElementById('g-quien').value,fecha:document.getElementById('g-fecha').value});
-  setData('gastos',gastos);['g-desc','g-monto'].forEach(id=>document.getElementById(id).value='');renderAll();
+  state.gastos.unshift({id:uid(),desc,cat:document.getElementById('g-cat').value,monto,quien:document.getElementById('g-quien').value,fecha:document.getElementById('g-fecha').value});
+  scheduleSave();['g-desc','g-monto'].forEach(id=>document.getElementById(id).value='');renderAll();
 }
-function elimGasto(id){if(!confirm('¿Eliminar?'))return;setData('gastos',getData('gastos').filter(g=>g.id!==id));renderAll()}
+function elimGasto(id){if(!confirm('¿Eliminar?'))return;state.gastos=state.gastos.filter(g=>g.id!==id);scheduleSave();renderAll()}
 function guardarStock(){
   const marca=document.getElementById('s-marca').value.trim();const modelo=document.getElementById('s-modelo').value.trim();
   if(!marca||!modelo){alert('Completá marca y modelo.');return}
-  const stock=getData('stock');
-  stock.unshift({id:uid(),marca,modelo,anio:document.getElementById('s-anio').value,precioUSD:parseFloat(document.getElementById('s-usd').value)||0,estado:'disponible',notas:document.getElementById('s-notas').value.trim(),compra:{costo:parseFloat(document.getElementById('s-costo').value)||0,gastos:[],echeqs:[]}});
-  setData('stock',stock);['s-marca','s-modelo','s-anio','s-costo','s-usd','s-notas'].forEach(id=>document.getElementById(id).value='');renderAll();
+  state.stock.unshift({id:uid(),marca,modelo,anio:document.getElementById('s-anio').value,precioUSD:parseFloat(document.getElementById('s-usd').value)||0,estado:'disponible',notas:document.getElementById('s-notas').value.trim(),compra:{costo:parseFloat(document.getElementById('s-costo').value)||0,gastos:[],echeqs:[]}});
+  scheduleSave();['s-marca','s-modelo','s-anio','s-costo','s-usd','s-notas'].forEach(id=>document.getElementById(id).value='');renderAll();
 }
 function guardarVenta(){
   const cliente=document.getElementById('v-cliente').value.trim();const moto=document.getElementById('v-moto').value.trim();const usd=parseFloat(document.getElementById('v-usd').value)||0;
   if(!cliente||!moto||!usd){alert('Completá cliente, moto y precio.');return}
   const nc=parseInt(document.getElementById('v-cuotas').value)||1;const fecha=document.getElementById('v-fecha').value;
   const cuotas=[];for(let i=0;i<nc;i++){const f=new Date(fecha+'T12:00:00');f.setMonth(f.getMonth()+i);cuotas.push({label:'Cuota '+(i+1),fecha:f.toISOString().split('T')[0],usd:usd/nc,tc:null,pagado:false})}
-  const ops=getData('ops');
-  ops.unshift({id:uid(),nombre:moto,cliente,compra:{costo:parseFloat(document.getElementById('v-costo').value)||0,gastos:[],echeqs:[]},venta:{precioUSD:usd,cuotas}});
-  setData('ops',ops);['v-cliente','v-moto','v-usd','v-costo','v-cuotas','v-notas'].forEach(id=>document.getElementById(id).value='');document.getElementById('v-fecha').value=hoy;renderAll();
+  state.ops.unshift({id:uid(),nombre:moto,cliente,compra:{costo:parseFloat(document.getElementById('v-costo').value)||0,gastos:[],echeqs:[]},venta:{precioUSD:usd,cuotas}});
+  scheduleSave();['v-cliente','v-moto','v-usd','v-costo','v-cuotas','v-notas'].forEach(id=>document.getElementById(id).value='');document.getElementById('v-fecha').value=hoy;renderAll();
 }
+
 function cobradoUSD(op){return op.venta.cuotas.filter(c=>c.pagado).reduce((s,c)=>s+(c.usd||(c.ars?(c.ars/(c.tc||1)):0)),0)}
 
 function exportarExcel(){
-  const ops=getData('ops');const stock=getData('stock');const gastos=getData('gastos');
+  const {ops,stock,gastos}=state;
   const wb=XLSX.utils.book_new();
   const comprasRows=[['Moto','Cliente','Echeq / Gasto','Fecha','Monto $','Estado']];
   [...ops,...stock.map(s=>({...s,cliente:'(stock)'}))].forEach(op=>{
     const c=op.compra;const nombre=op.nombre||(op.marca+' '+op.modelo);
     c.echeqs.forEach(e=>comprasRows.push([nombre,op.cliente||'',e.label,fmtF(e.fecha),e.monto,e.pagado?'Pagado':'Pendiente']));
     c.gastos.forEach(g=>comprasRows.push([nombre,op.cliente||'',g.desc,'-',g.monto,'Gasto extra']));
-    comprasRows.push([nombre,op.cliente||'','COSTO TOTAL','-',c.costo+c.gastos.reduce((s,g)=>s+g.monto,0),'']);
-    comprasRows.push([]);
+    comprasRows.push([nombre,op.cliente||'','COSTO TOTAL','-',c.costo+c.gastos.reduce((s,g)=>s+g.monto,0),'']);comprasRows.push([]);
   });
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(comprasRows),'Compras');
   const ventasRows=[['Moto','Cliente','Cuota','Fecha','USD','TC','$ ARS','Estado']];
-  ops.forEach(op=>{
-    op.venta.cuotas.forEach(c=>{const usd=c.usd||(c.ars&&c.tc?c.ars/c.tc:null);const ars=c.ars||(c.usd&&c.tc?c.usd*c.tc:null);ventasRows.push([op.nombre,op.cliente,c.label,fmtF(c.fecha),usd?Math.round(usd):'',c.tc||'',ars?Math.round(ars):'',c.pagado?'Cobrado':'Pendiente'])});
-    ventasRows.push([op.nombre,op.cliente,'TOTAL','-',op.venta.precioUSD,'','','']);ventasRows.push([]);
-  });
+  ops.forEach(op=>{op.venta.cuotas.forEach(c=>{const usd=c.usd||(c.ars&&c.tc?c.ars/c.tc:null);const ars=c.ars||(c.usd&&c.tc?c.usd*c.tc:null);ventasRows.push([op.nombre,op.cliente,c.label,fmtF(c.fecha),usd?Math.round(usd):'',c.tc||'',ars?Math.round(ars):'',c.pagado?'Cobrado':'Pendiente'])});ventasRows.push([op.nombre,op.cliente,'TOTAL','-',op.venta.precioUSD,'','','']);ventasRows.push([]);});
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ventasRows),'Ventas');
   const gastosRows=[['Descripción','Categoría','Monto $','A cargo de','Fecha']];
   gastos.forEach(g=>gastosRows.push([g.desc,g.cat,g.monto,g.quien,fmtF(g.fecha)]));
   gastosRows.push([]);gastosRows.push(['TOTAL','','',gastos.reduce((s,g)=>s+g.monto,0),'']);
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(gastosRows),'Gastos');
-  const resRows=[['Resumen — Eva Motos','Fecha: '+fmtF(hoy)],[]];
-  ops.forEach(op=>{const cobUSD=cobradoUSD(op);const pct=op.venta.precioUSD>0?Math.round(cobUSD/op.venta.precioUSD*100):0;resRows.push([op.nombre+' — '+op.cliente,'USD cobrado: '+Math.round(cobUSD)+' / '+op.venta.precioUSD+' ('+pct+'%)'])});
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(resRows),'Resumen');
   XLSX.writeFile(wb,'EvaMotos_'+hoy+'.xlsx');
 }
 
 function renderStats(){
-  const ops=getData('ops');const stock=getData('stock');
+  const {ops,stock}=state;
   const totalUSD=ops.reduce((s,o)=>s+o.venta.precioUSD,0);
   const cobUSD=ops.reduce((s,o)=>s+cobradoUSD(o),0);
   const vencV=ops.reduce((s,o)=>s+o.venta.cuotas.filter(c=>!c.pagado&&c.fecha<hoy).length,0);
@@ -261,15 +294,13 @@ function renderStats(){
     <div class="stat"><div class="lbl">Pagos compra pend.</div><div class="val w">${fmtS(comprasPend)}</div></div>
     <div class="stat"><div class="lbl">Stock</div><div class="val w">${stock.filter(s=>s.estado==='disponible').length}</div><div class="sub">motos disponibles</div></div>`;
 }
+
 function renderCompras(){
-  const ops=getData('ops');const stock=getData('stock');
+  const {ops,stock}=state;
   const sel=document.getElementById('gc-op');sel.innerHTML=ops.map(o=>`<option value="${o.id}">${o.nombre} — ${o.cliente}</option>`).join('');
   const renderB=(nombre,cliente,compra,fn,id)=>{
-    const pag=compra.echeqs.filter(e=>e.pagado).reduce((s,e)=>s+e.monto,0);
-    const tot=compra.echeqs.reduce((s,e)=>s+e.monto,0);
-    const gT=compra.gastos.reduce((s,g)=>s+g.monto,0);
-    const venc=compra.echeqs.filter(e=>!e.pagado&&e.fecha<hoy).length;
-    const pct=tot>0?Math.round(pag/tot*100):0;
+    const pag=compra.echeqs.filter(e=>e.pagado).reduce((s,e)=>s+e.monto,0);const tot=compra.echeqs.reduce((s,e)=>s+e.monto,0);
+    const gT=compra.gastos.reduce((s,g)=>s+g.monto,0);const venc=compra.echeqs.filter(e=>!e.pagado&&e.fecha<hoy).length;const pct=tot>0?Math.round(pag/tot*100):0;
     return`<div class="card"><div class="card-head"><span style="color:var(--white);font-size:12px;font-weight:500">${nombre}${cliente?` <span style="color:#666;font-weight:400">— ${cliente}</span>`:''}</span><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--red);font-size:11px">${fmtS(pag)} / ${fmtS(tot)}</span>${venc>0?`<span class="badge br">${venc} venc.</span>`:''}</div></div>
     <table><thead><tr><th>Costo base</th><th>Gastos extra</th><th>Costo total</th><th>Pagado</th><th>Pendiente</th></tr></thead><tbody><tr><td class="re">${fmtS(compra.costo)}</td><td class="am">${fmtS(gT)}</td><td class="re">${fmtS(compra.costo+gT)}</td><td class="re">${fmtS(pag)} (${pct}%)</td><td class="re">${fmtS(tot-pag)}</td></tr></tbody></table>
     <div style="padding:4px 7px;font-size:9px;color:#3a3a3a;border-top:1px solid var(--border)">${compra.gastos.map(g=>g.desc+' '+fmtS(g.monto)).join(' · ')||'Sin gastos extra'}</div>
@@ -277,20 +308,23 @@ function renderCompras(){
   };
   document.getElementById('compras-content').innerHTML=ops.map(o=>renderB(o.nombre,o.cliente,o.compra,'toggleCompraOp',o.id)).join('')+stock.map(s=>renderB(s.marca+' '+s.modelo+' (stock)',null,s.compra,'toggleCompraStock',s.id)).join('');
 }
+
 function renderGastos(){
-  const gastos=getData('gastos');const qL={ambos:'Ambos',lucho:'Lucho',miguel:'Miguel'};
+  const {gastos}=state;const qL={ambos:'Ambos',lucho:'Lucho',miguel:'Miguel'};
   document.getElementById('tgastos').innerHTML=gastos.length?`<table><thead><tr><th>Descripción</th><th>Cat.</th><th>Monto</th><th>Cargo</th><th>Fecha</th><th></th></tr></thead><tbody>${gastos.map(g=>`<tr><td>${g.desc}</td><td><span class="badge bc">${g.cat}</span></td><td class="cy">${fmtS(g.monto)}</td><td style="color:#666">${qL[g.quien]||g.quien}</td><td style="color:#555">${fmtF(g.fecha)}</td><td><button class="btn btnd" onclick="elimGasto('${g.id}')">del</button></td></tr>`).join('')}</tbody></table>`:'<div style="color:#333;font-size:11px;padding:8px">Sin gastos.</div>';
 }
+
 function renderVentas(){
-  const ops=getData('ops');
+  const {ops}=state;
   document.getElementById('ventas-content').innerHTML=ops.map(op=>{
     const cobUSD=cobradoUSD(op);const pct=op.venta.precioUSD>0?Math.round(cobUSD/op.venta.precioUSD*100):0;const venc=op.venta.cuotas.filter(c=>!c.pagado&&c.fecha<hoy).length;
     return`<div class="card"><div class="card-head"><span style="color:var(--white);font-size:12px;font-weight:500">${op.nombre} <span style="color:#666;font-weight:400">— ${op.cliente}</span></span><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:11px">${fmtU(cobUSD)} / ${fmtU(op.venta.precioUSD)} · ${pct}%</span>${venc>0?`<span class="badge br">${venc} venc.</span>`:`<span class="badge bg">${pct}%</span>`}</div></div>
     ${op.venta.cuotas.map((c,i)=>{const venc=!c.pagado&&c.fecha<hoy;const usdVal=c.usd||(c.ars&&c.tc?c.ars/c.tc:null);return`<div class="cr${venc?' venc':''}"><span style="font-size:11px;color:#888;min-width:65px">${c.label}</span><span style="font-size:11px;color:#666;min-width:65px">${fmtF(c.fecha)}</span><span class="cy" style="font-size:11px;min-width:90px">${c.ars?fmtS(c.ars):usdVal?fmtU(usdVal):'-'}</span><input class="tc-in" type="number" placeholder="TC" value="${c.tc||''}" onchange="saveTc('${op.id}',${i},this.value)" ${c.pagado?'disabled':''}><div class="cbi"><input type="checkbox" ${c.pagado?'checked':''} onchange="toggleVenta('${op.id}',${i})" style="width:13px;height:13px;accent-color:#00e5cc"><span style="color:${c.pagado?'#00c97a':venc?'var(--red)':'#444'}">${c.pagado?'Cobrado':venc?'VENCIDO':'Pendiente'}</span></div></div>`}).join('')}</div>`;
   }).join('');
 }
+
 function renderResumen(){
-  const ops=getData('ops');const stock=getData('stock');
+  const {ops,stock}=state;
   const venc=ops.reduce((s,o)=>s+o.venta.cuotas.filter(c=>!c.pagado&&c.fecha<hoy).length,0);
   const proxV=ops.flatMap(o=>o.venta.cuotas.filter(c=>!c.pagado&&c.fecha>=hoy).map(c=>({...c,op:o.nombre+' — '+o.cliente}))).sort((a,b)=>a.fecha.localeCompare(b.fecha)).slice(0,8);
   const proxC=[...ops.flatMap(o=>o.compra.echeqs.filter(e=>!e.pagado).map(e=>({...e,op:o.nombre+' — '+o.cliente}))),
@@ -300,12 +334,18 @@ function renderResumen(){
   <div><div class="sec">Próximos pagos de compra</div><table><thead><tr><th>Fecha</th><th>Operación</th><th>$</th></tr></thead><tbody>${proxC.length?proxC.map(e=>`<tr><td style="${e.fecha<hoy?'color:var(--red)':''}">${fmtF(e.fecha)}</td><td style="color:#555">${e.op}</td><td class="re">${fmtS(e.monto)}</td></tr>`).join(''):'<tr><td colspan="3" style="color:#333;text-align:center;padding:10px">Sin pagos pendientes</td></tr>'}</tbody></table></div></div>`;
   document.getElementById('dash').innerHTML=html;
 }
+
 function renderStock(){
-  const stock=getData('stock');
+  const {stock}=state;
   document.getElementById('stock-content').innerHTML=stock.map(s=>`<div class="card"><div class="card-head"><div><span style="color:var(--white);font-weight:500;font-size:13px">${s.marca} ${s.modelo} ${s.anio||''}</span>${s.notas?`<div style="font-size:10px;color:#555;margin-top:1px">${s.notas}</div>`:''}</div><div style="display:flex;gap:8px;align-items:center"><span class="badge ba">En stock</span><span style="color:var(--amber);font-size:11px">USD ${(s.precioUSD||0).toLocaleString('es-AR')}</span></div></div><table><thead><tr><th>Costo base</th><th>Gastos extra</th><th>Costo total</th></tr></thead><tbody><tr><td class="re">${fmtS(s.compra.costo)}</td><td class="am">${fmtS(s.compra.gastos.reduce((a,g)=>a+g.monto,0))}</td><td class="re">${fmtS(s.compra.costo+s.compra.gastos.reduce((a,g)=>a+g.monto,0))}</td></tr></tbody></table></div>`).join('')||'<div style="color:#333;padding:12px;font-size:11px">Sin motos en stock.</div>';
 }
+
 function renderAll(){renderStats();renderCompras();renderGastos();renderVentas();renderResumen();renderStock()}
-renderAll();
+
+// Auto-refresh cada 30 segundos para ver cambios del otro usuario
+setInterval(loadData, 30000);
+
+loadData();
 </script>
 </body>
 </html>
